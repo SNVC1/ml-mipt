@@ -12,20 +12,24 @@ def rbf(x_1, x_2, sigma=1.):
 
     Args:
         x_1: torch.tensor shaped `(#samples_1, #features)` of type torch.float32
-        x_2: torch.tensor shaped `(#samples_1, #features)` of type torch.float32
+        x_2: torch.tensor shaped `(#samples_2, #features)` of type torch.float32
     Returns:
         kernel function values for all pairs of samples from x_1 and x_2
         torch.tensor of type torch.float32 shaped `(#samples_1, #samples_2)`
     '''
-    distances = ### YOUR CODE HERE
+    x1_1 = torch.stack([(x_1**2).sum(dim=1)] * x_2.shape[0], dim=0).t()
+    x2_2 = torch.stack([(x_2**2).sum(dim=1)] * x_1.shape[0], dim=0)
+    x1_2 = x_1 @ x_2.t()
+    distances = torch.exp((-x1_1 + 2 * x1_2 - x2_2) / (2 * sigma**2))
     return torch.Tensor(distances).type(torch.float32)
 
 def hinge_loss(scores, labels):
-    '''Mean loss for batch of objects
+    '''
+    Mean loss for batch of objects
     '''
     assert len(scores.shape) == 1
     assert len(labels.shape) == 1
-    return ### YOUR CODE HERE
+    return ((1 - scores * labels >= 0) * (1 - scores * labels)).mean()
 
 
 class SVM(BaseEstimator, ClassifierMixin):
@@ -35,12 +39,12 @@ class SVM(BaseEstimator, ClassifierMixin):
         
         Args:
             x_1: torch.tensor shaped `(#samples_1, #features)` of type torch.float32
-            x_2: torch.tensor shaped `(#samples_1, #features)` of type torch.float32
+            x_2: torch.tensor shaped `(#samples_2, #features)` of type torch.float32
         Returns:
             kernel function values for all pairs of samples from x_1 and x_2
             torch.tensor shaped `(#samples_1, #samples_2)` of type torch.float32
         '''
-        return ### YOUR CODE HERE
+        return x_1 @ x_2.t()
     
     def __init__(
         self,
@@ -83,7 +87,8 @@ class SVM(BaseEstimator, ClassifierMixin):
                 
                 optimizer.zero_grad()     # Manually zero the gradient buffers of the optimizer
                 
-                preds = ### YOUR CODE HERE # get the matrix product using SVM parameters: self.betas and self.bias
+                preds = k_batch @ self.betas + self.bias
+                # get the matrix product using SVM parameters: self.betas and self.bias
                 preds = preds.flatten()
                 loss = self.lmbd * self.betas[batch_inds].T @ k_batch @ self.betas + hinge_loss(preds, y_batch)
                 loss.backward()           # Backpropagation
@@ -102,7 +107,7 @@ class SVM(BaseEstimator, ClassifierMixin):
             batch = torch.from_numpy(batch).float()
             K = self.kernel_function(batch, self.X)
             # compute the margin values for every object in the batch
-            return ### YOUR CODE HERE
+            return (K @ self.betas + self.bias).flatten()
 
     def predict(self, batch):
         scores = self.predict_scores(batch)

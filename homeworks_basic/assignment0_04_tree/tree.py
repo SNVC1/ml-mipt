@@ -16,11 +16,12 @@ def entropy(y):
     float
         Entropy of the provided subset
     """
-    EPS = 0.0005
-
-    # YOUR CODE HERE
+    EPS = 5e-4
     
-    return 0.
+    if len(y) == 0:
+        return 1
+    probs = y.mean(axis=0)
+    return -np.sum(probs * np.log2(probs + (probs == 0) * EPS))
     
 def gini(y):
     """
@@ -36,10 +37,10 @@ def gini(y):
     float
         Gini impurity of the provided subset
     """
-
-    # YOUR CODE HERE
-    
-    return 0.
+    if len(y) == 0:
+        return 1
+    probs = y.mean(axis=0)
+    return 1 - np.sum(probs**2)
     
 def variance(y):
     """
@@ -56,9 +57,9 @@ def variance(y):
         Variance of the provided target vector
     """
     
-    # YOUR CODE HERE
-    
-    return 0.
+    if len(y) == 0:
+        return 1
+    return np.mean((y - np.mean(y))**2)
 
 def mad_median(y):
     """
@@ -75,10 +76,10 @@ def mad_median(y):
     float
         Mean absolute deviation from the median in the provided vector
     """
-
-    # YOUR CODE HERE
     
-    return 0.
+    if len(y) == 0:
+        return 1
+    return np.mean(abs(y - np.median(y)))
 
 
 def one_hot_encode(n_classes, y):
@@ -92,10 +93,10 @@ def one_hot_decode(y_one_hot):
 
 
 class Node:
-    def __init__(self, feature_index, threshold, proba=0):
+    def __init__(self, feature_index, threshold, depth=1):
         self.feature_index = feature_index
         self.value = threshold
-        self.proba = proba
+        self.depth = depth
         self.left_child = None
         self.righ_child = None
         
@@ -115,10 +116,10 @@ class DecisionTree(BaseEstimator):
         
         self.n_classes = n_classes
         self.max_depth = max_depth
+        self.current_depth = 1
         self.min_samples_split = min_samples_split
         self.criterion_name = criterion_name
 
-        self.depth = 0
         self.root = None # Use the Node class to initialize it later
         self.debug = debug
 
@@ -151,7 +152,13 @@ class DecisionTree(BaseEstimator):
             Part of the providev subset where selected feature x^j >= threshold
         """
 
-        # YOUR CODE HERE
+        right_indices = np.argwhere(X_subset.T[feature_index] >= threshold).ravel()
+        left_indices = np.argwhere(X_subset.T[feature_index] < threshold).ravel()
+        
+        X_left = X_subset[left_indices]
+        y_left = y_subset[left_indices]
+        X_right = X_subset[right_indices]
+        y_right = y_subset[right_indices]
         
         return (X_left, y_left), (X_right, y_right)
     
@@ -185,7 +192,11 @@ class DecisionTree(BaseEstimator):
             Part of the provided subset where selected feature x^j >= threshold
         """
 
-        # YOUR CODE HERE
+        right_indices = np.argwhere(X_subset.T[feature_index] >= threshold).ravel()
+        left_indices = np.argwhere(X_subset.T[feature_index] < threshold).ravel()
+        
+        y_left = y_subset[left_indices]
+        y_right = y_subset[right_indices]
         
         return y_left, y_right
 
@@ -211,12 +222,24 @@ class DecisionTree(BaseEstimator):
             Threshold value to perform split
 
         """
-        # YOUR CODE HERE
-        return feature_index, threshold
+        assert len(y_subset) > 1
+        G_opt = None
+        threshold_opt = 0
+        feature_index_opt = 0
+        
+        for feature_index in range(X_subset.shape[1]):
+            for threshold in np.unique(X_subset.T[feature_index]):
+                y_left, y_right = self.make_split_only_y(feature_index, threshold, X_subset, y_subset)
+                G = (len(y_left) * self.criterion(y_left) + len(y_right) * self.criterion(y_right)) / len(y_subset)
+                if G_opt is None or G < G_opt:
+                    G_opt = G
+                    threshold_opt = threshold
+                    feature_index_opt = feature_index
+        
+        return feature_index_opt, threshold_opt
     
     def make_tree(self, X_subset, y_subset):
         """
-        Recursively builds the tree
         
         Parameters
         ----------
@@ -232,8 +255,27 @@ class DecisionTree(BaseEstimator):
         root_node : Node class instance
             Node of the root of the fitted tree
         """
-
-        # YOUR CODE HERE
+        
+        feasible_criterion = 5e-2
+        assert len(y_subset) != 0
+        if self.current_depth <= self.max_depth and \
+           len(y_subset) >= self.min_samples_split and \
+           self.criterion(y_subset) >= feasible_criterion: # children required
+            
+            feature_index, threshold = self.choose_best_split(X_subset, y_subset)
+            new_node = Node(feature_index, threshold, self.current_depth)
+            (X_left, y_left), (X_right, y_right) = self.make_split(feature_index, threshold, X_subset, y_subset)
+            self.current_depth = new_node.depth + 1
+            new_node.left_child = self.make_tree(X_left, y_left)
+            self.current_depth = new_node.depth + 1
+            new_node.right_child = self.make_tree(X_right, y_right)
+            self.current_depth = new_node.depth
+        else: # decision required
+            new_node = Node(0, 0, self.current_depth)
+            if self.classification:
+                new_node.probs = y_subset.mean(axis=0)
+            else:
+                new_node.decision = np.mean(y_subset)
         
         return new_node
         
@@ -255,14 +297,13 @@ class DecisionTree(BaseEstimator):
         self.criterion, self.classification = self.all_criterions[self.criterion_name]
         if self.classification:
             if self.n_classes is None:
-                self.n_classes = len(np.unique(ans))
+                self.n_classes = len(np.unique(y))
             y = one_hot_encode(self.n_classes, y)
-
         self.root = self.make_tree(X, y)
     
     def predict(self, X):
         """
-        Predict the target value or class label  the model from scratch using the provided data
+        Predict the target value or class label the model from scratch using the provided data
         
         Parameters
         ----------
@@ -276,10 +317,20 @@ class DecisionTree(BaseEstimator):
             Column vector of class labels in classification or target values in regression
         
         """
-
-        # YOUR CODE HERE
         
-        return y_predicted
+        if self.classification:
+            y_predicted = np.argmax(self.predict_proba(X), axis=1)
+        else:
+            y_predicted = np.zeros(len(X))
+            for i, x in enumerate(X):
+                current_node = self.root
+                while not (current_node.left_child is None):
+                    feature_index = current_node.feature_index
+                    threshold = current_node.value
+                    current_node = current_node.left_child if x[feature_index] < threshold else current_node.right_child
+                y_predicted[i] = current_node.decision
+    
+        return y_predicted[:, np.newaxis]
         
     def predict_proba(self, X):
         """
@@ -299,6 +350,13 @@ class DecisionTree(BaseEstimator):
         """
         assert self.classification, 'Available only for classification problem'
 
-        # YOUR CODE HERE
-        
+        y_predicted_probs = np.zeros((len(X), self.n_classes))
+        for i, x in enumerate(X):
+            current_node = self.root
+            while not (current_node.left_child is None):
+                feature_index = current_node.feature_index
+                threshold = current_node.value
+                current_node = current_node.left_child if x[feature_index] < threshold else current_node.right_child
+            y_predicted_probs[i] = current_node.probs
+     
         return y_predicted_probs
